@@ -66,10 +66,9 @@ def process_stage(graph, component):
 def process_pipeline(graph, component):
     name = component['name']
     #graph.node(name)
-    subgraph = gv.Digraph('cluster_' + name)
+    subgraph = gv.Digraph('cluster_' + name, graph_attr={'compound': 'true'})
     subgraph.body.append('label = "{}"'.format(name))
     subgraph.body.append('color=blue')
-    #subgraph.node(name, style='invis')
     components = component['components']
     dataflows = component['dataflows']
     process_components(subgraph, components)
@@ -99,7 +98,7 @@ def process_top_level(pipeline):
     description = pipeline['description']
     components = pipeline['components']
     dataflows = pipeline['dataflows']
-    toplevel_graph = gv.Digraph(name, format='png') 
+    toplevel_graph = gv.Digraph(name, format='png', graph_attr={'compound': 'true'}) 
     process_components(toplevel_graph, components)
     process_dataflows(toplevel_graph, dataflows)
     #toplevel_graph.render(filename=name)
