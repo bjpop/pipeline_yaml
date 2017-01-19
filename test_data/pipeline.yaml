@@ -96,7 +96,8 @@ components:
       type: BAM
 dataflows:
     -
-      source: alignment
+      #source: alignment
+      source: aligned_reads 
       destination: merge_alignments
     -
       source: merge_alignments

@@ -7,18 +7,18 @@ LONG_DESCRIPTION = \
 
 
 setup(
-    name='pipeline_yaml-py',
+    name='pipeline_yaml',
     version='0.1.0.0',
     author='Bernie Pope',
     author_email='bjpope@unimelb.edu.au',
     packages=['pipeline_yaml'],
     package_dir={'pipeline_yaml': 'pipeline_yaml'},
     entry_points={
-        'console_scripts': ['pipeline_yaml-py = pipeline_yaml.pipeline_yaml:main']
+        'console_scripts': ['pipeline_yaml = pipeline_yaml.pipeline_yaml:main']
     },
     url='https://github.com/bjpop/pipeline_yaml',
     license='LICENSE',
     description=('A prototypical bioinformatics command line tool'),
     long_description=(LONG_DESCRIPTION),
-    install_requires=["yaml"],
+    install_requires=["pyyaml", "graphviz"],
 )
