@@ -74,9 +74,6 @@ components:
             source: reads_2.fastq.gz
             destination: align_to_ref
           -
-            source: reference_genome
-            destination: align_to_ref
-          -
             source: align_to_ref
             destination: aligned_reads
     -
@@ -102,3 +99,6 @@ dataflows:
     -
       source: merge_alignments
       destination: merged_bam
+    -
+      source: reference_genome
+      destination: align_to_ref
