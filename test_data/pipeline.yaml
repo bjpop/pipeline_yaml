@@ -1,0 +1,103 @@
+# pipeline has
+#    name (is a string)
+#    description (is a string)
+#    [component]
+#    [dataflow]
+# 
+# component is one of
+#    data
+#    stage
+#    pipeline
+# 
+# data has
+#    name (is a string)
+#    description (is a string)
+#    type (is a string, perhaps from a fixed set of choices?)
+# 
+# stage has
+#    name (is a string)
+#    description (is a string)
+#    [tool]
+#    [command]
+# 
+# dataflow has
+#    source (is a name)
+#    destination (is a name)
+
+class: pipeline
+name: variant_calling
+description: MGHA germline variant calling pipeline for singletons
+components:
+    -
+      class: data 
+      name: reference_genome
+      description: Human Genome Reference, version hg19
+      type: FASTA
+    -
+      class: pipeline
+      name: alignment 
+      description: align paired-end sequence reads for a single sample from a single flow cell lane
+      components:
+           -
+             class: data
+             name: reads_1.fastq.gz 
+             description: forward reads from single lane of flow cell for a single input sample
+             type: FASTQ.gz
+           -
+             class: data
+             name: reads_2.fastq.gz 
+             description: reverse reads from single lane of flow cell for a single input sample
+             type: FASTQ.gz
+           -
+             class: stage
+             name: align_to_ref
+             description: align paired-end FASTQ files to reference genome 
+             tools:
+                 -
+                   name: BWA
+                   version: "1.1"
+                 -
+                   name: samtools
+                   version: "4.3.2a" 
+             commands:
+                 - bwa $REFERENCE read1.fastq.gz read2.fastq.gz | samtools view > output.bam 
+           -
+             class: data
+             name: aligned_reads
+             description: paired-end reads aligned to a reference file for a single flow-cell lane for a single input sample
+             type: BAM
+      dataflows:
+          - 
+            source: reads_1.fastq.gz 
+            destination: align_to_ref
+          -
+            source: reads_2.fastq.gz
+            destination: align_to_ref
+          -
+            source: reference_genome
+            destination: align_to_ref
+          -
+            source: align_to_ref
+            destination: aligned_reads
+    -
+      class: stage
+      name: merge_alignments
+      description: merge the per-lane alignments for a single input sample
+      tools:
+          -
+            name: picard
+            version: "3.2"
+      commands:
+          - picard merge 1.bam 2.bam ... N.bam > merged.bam
+    -
+      class: data
+      name: merged_bam
+      description: merger of all per-lane BAM files for a single input sample
+      type: BAM
+dataflows:
+    -
+      source: alignment
+      destination: merge_alignments
+    -
+      source: merge_alignments
+      destination: merged_bam
