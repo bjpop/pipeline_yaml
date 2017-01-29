@@ -1,0 +1,814 @@
+# pipeline has
+#    name (is a string)
+#    description (is a string)
+#    [component]
+#    [dataflow]
+# 
+# component is one of
+#    data
+#    stage
+#    pipeline
+# 
+# data has
+#    name (is a string)
+#    description (is a string)
+#    type (is a string, perhaps from a fixed set of choices?)
+# 
+# stage has
+#    name (is a string)
+#    description (is a string)
+#    [tool]
+#    [command]
+# 
+# dataflow has
+#    source (is a name)
+#    destination (is a name)
+
+class: pipeline
+name: variant_calling
+description: MGHA germline variant calling pipeline for singletons
+components:
+    -
+      class: stage
+      name: select_target_region
+      type: bed
+      description:
+      tools:
+        -
+          name: combined_target_region.py
+          version:
+        -
+          name: bedtools
+          version: "2.25.0"
+    -
+      class: data
+      name: combined_target_region.bed
+      description:
+      type: bed
+      attribute:
+              - reference
+    -
+      class: data
+      name: UCSC_exons.bed
+      description:
+      type: bed
+      attribute:
+              - reference
+    -
+      class: data
+      name: reference_genome
+      description: Human Genome Reference, version hg19
+      type: FASTA
+      attribute:
+               - reference
+    -
+      class: data
+      name: reference_SNPs
+      description: dbSNP_138
+      type: vcf
+      attribute:
+               - reference
+    -
+      class: data
+      name: reference_indels
+      description: Mills & 1000g gold standard indels
+      type: vcf
+      attribute:
+               - reference
+    -
+      class: data
+      name: Homo_sapiens.GRCh37.75.dna.primary_assembly.fa
+      description:
+      type: fasta
+      attribute:
+              - reference
+    -
+      class: data
+      name: 1000G_phase3.refinedindels.vcf
+      description:
+      type: fasta
+      attribute:
+              - reference
+    -
+      class: stage
+      name: curation
+      type:
+      description:
+      tools: 
+        -
+          name: LOVD
+          version: "+"
+    -
+      class: pipeline
+      name: read_calling&filtering
+      description:
+      components:
+            -
+             class: stage
+             name: assess_read_quality
+             type:
+             description:
+             tools:
+                 -
+                   name: fastQC
+                   version: "0.11.5"
+            -
+             class: data
+             name: sampleR1.fastq
+             description: forward reads from single lane of flow cell for a single input sample
+             type: FASTQ.gz
+             attribute:
+                 - intermediate
+            -
+             class: data
+             name: sampleR2.fastq
+             description: reverse reads from single lane of flow cell for a single input sample
+             type: FASTQ.gz
+             attribute:
+                 - intermediate
+      dataflows:
+            -
+              source: assess_read_quality
+              destination: sampleR1.fastq
+              action: 
+            -
+              source: assess_read_quality
+              destination: sampleR2.fastq
+              action: 
+
+    -
+      class: pipeline
+      name: alignment
+      description: align paired-end sequence reads for a single sample from a single flow cell lane
+      components:
+            -
+             class: stage
+             name: align_to_ref
+             description: align paired-end FASTQ files to reference genome
+             type:
+             tools:
+                 -
+                   name: bwa
+                   version: "0.7.13"
+                 -
+                   name: samtools
+                   version: "1.3"
+                   
+             commands:
+                 - bwa $REFERENCE read1.fastq.gz read2.fastq.gz | samtools view > output.bam 
+            -
+              class: data
+              name: aligned_reads.bam
+              description: paired-end reads aligned to a reference file for a single flow-cell lane for a single input sample
+              type: BAM
+              attribute:
+                 - intermediate
+            -
+              class: stage
+              name: merge_alignments
+              description: merge the per-lane alignments for a single input sample
+              type:
+              tools:
+                -
+                  name: picard
+                  version: "3.2"
+              commands:
+                 - picard merge 1.bam 2.bam ... N.bam > merged.bam
+            -
+              class: data
+              name: merged_reads.bam
+              description: merger of all per-lane BAM files for a single input sample
+              type: BAM
+              attribute:
+                 - intermediate
+      dataflows:
+            -
+              source: sampleR1.fastq
+              destination: align_to_ref
+              action: usedBy
+            -
+              source: sampleR2.fastq
+              destination: align_to_ref
+              action: usedBy
+            -
+              source: align_to_ref
+              destination: aligned_reads.bam
+              action: creates
+            -
+              source: aligned_reads.bam
+              destination: merge_alignments
+              action: usedBy
+            -
+              source: merge_alignments
+              destination: merged_reads.bam
+              action: generates
+
+    -
+      class: pipeline
+      name: optimise_alignment
+      description:
+      components:
+            -
+              class: stage
+              name: remove_duplicates
+              description:
+              type:
+              tools:
+                -
+                  name: picard_markduplicates
+                  version: "2.6"
+                  commands:
+            -
+              class: data
+              name: deduped.bam
+              description: duplicate reads marked or removed from single bam file containing all samples
+              type: BAM
+              attribute:
+                - intermediate
+            -
+              class: data
+              name: deduped_metrics.txt
+              description: 
+              type: txt
+              attribute:
+                - result
+                - intermediate
+      dataflows:
+            -
+              source: merged_reads.bam
+              destination: remove_duplicates
+              action: usedBy
+            -
+              source: remove_duplicates
+              destination: deduped.bam
+              action: generates
+            -
+              source: remove_duplicates
+              destination: deduped_metrics.txt
+              action: creates
+            
+    -
+      class: pipeline
+      name: local_realignment
+      components:
+            -
+              class: stage
+              name: interval_creation
+              description: realignment around location of known indels
+              type:
+              tools:
+               -
+                 name: gatk_realignerTargetCreator
+            -
+              class: stage
+              name: indel_realignment
+              description: realignment around location of known indels
+              type:
+              tools:
+               -
+                 name: gatk_intervalcreator
+                 version: "3.6"
+            -
+              class: data
+              name: intervalsToBeRealigned.intervals
+              type: txt
+              attribute:
+                   - intermediate 
+            -
+              class: data
+              name: realigned.bam
+              description: 
+              type: BAM
+              attribute:
+                 - intermediate
+                    
+      dataflows:
+            -
+              source: deduped.bam
+              destination: interval_creation
+              action: usedBy
+            -
+              source: interval_creation
+              destination: intervalsToBeRealigned.intervals
+              action: creates
+            -
+              source: deduped.bam
+              destination: indel_realignment
+              action: usedBy
+            -
+              source: indel_realignment
+              destination: realigned.bam
+              action: generates
+            -
+              source: intervalsToBeRealigned.intervals
+              destination: indel_realignment
+              action: usedBy
+
+    -
+      class: pipeline
+      name: quality_score_recalibration
+      description: recalibration of read quality scores
+      components:
+            -
+              class: stage
+              name: quality_score_calculation
+              description:
+              type:
+              tools:
+               -
+                 name: gatk_baserecalibrator
+                 version: "3.6"
+                 commands:
+            -
+              class: stage
+              name: update_reads
+              description:
+              type:
+              tools:
+               -
+                 name: gatk_printeads
+                 version: "3.6"
+            -
+              class: data
+              name: recalibrated.counts
+              description: 
+              type: txt
+              attribute:
+                 - intermediate
+            -
+              class: data
+              name: recalibrated.bam
+              description: 
+              type: bam
+              attribute:
+                  - intermediate
+      dataflows:
+            -
+              source: realigned.bam
+              destination: quality_score_calculation
+              action: usedBy
+            -
+              source: quality_score_calculation
+              destination: recalibrated.counts
+              action: creates
+            -
+              source: recalibrated.counts
+              destination: update_reads
+              action: usedBy
+            -
+              source: update_reads
+              destination: recalibrated.bam
+              action: generates
+
+              
+    -
+      class: pipeline
+      name: variant_discovery
+      description: 
+      components:
+            -
+              class: stage
+              name: call_variants
+              type:
+              description:
+              tools:
+                 -
+                   name: gatk_haplotypecaller
+                   version: "3.6"
+            -
+              class: data
+              name: raw_variants_discovered.vcf
+              description: 
+              type: vcf
+              attribute:
+                - intermediate
+            -
+              class: stage
+              name: calculate_variant_quality
+              type:
+              description:
+              tools:
+                 -
+                   name: gatk_haplotypecaller
+                   version: "3.6"
+            -
+              class: data
+              name: raw_variants_discovered.vcf
+              description: 
+              type: vcf
+              attribute:
+                - intermediate
+
+      dataflows:
+            -
+              source: recalibrated.bam
+              destination: call_variants
+              action: usedBy
+            -
+              source: recalibrated.bam
+              destination: calculate_variant_quality
+              action: usedBy
+            -
+              source: call_variants
+              destination: raw_variants_discovered.vcf
+              action: creates
+            -
+              source: calculate_variant_quality
+              destination: raw_variants_discovered.vcf
+              action: creates
+             
+    -
+      class: pipeline
+      name: variant_annotation
+      description:
+      components:
+            -
+              class: stage
+              name: normalise_variants
+              type:
+              description:
+              tools:
+              -
+                name: bfctools
+                version:
+            -
+              class: data
+              name: normalised_variants.vcf
+              type: vcf
+              attribute:
+                  - intermediate
+            -
+              class: stage
+              name: annotate_variants
+              type:
+              description:
+              tools:
+               - 
+                 name: VEP
+                 version: "85"
+            -
+              class: data
+              name: annotated_variants.vcf
+              type: vcf
+              attribute:
+                 - intermediate
+            -
+              class: stage
+              name: prioritise_variants_function
+              type:
+              description:
+              tools:
+               -
+                 name: condel
+                 version:
+               -
+                 name: grantham
+                 version:
+               -
+                 name: dbNSFP
+                 version:
+            -
+              class: data
+              name: prioritised_variants.vcf
+              type:
+              attribute:
+                 - intermediate
+      dataflows:
+            -
+             source: raw_variants_discovered.vcf
+             destination: normalise_variants
+             action:
+            -
+              source: normalise_variants
+              destination: normalised_variants.vcf
+              action: generates
+            -
+              source: normalised_variants.vcf
+              destination: annotate_variants
+              action: usedBy
+            -
+              source: annotate_variants
+              destination: annotated_variants.vcf
+              action: generates
+            -
+              source: annotated_variants.vcf
+              destination: prioritise_variants_function
+              action: usedBy
+            -
+              source: prioritise_variants_function
+              destination: prioritised_variants.vcf
+              action: generates
+            -
+              source: prioritised_variants.vcf
+              destination: discard_noncoding_variants
+              action: usedBy
+
+    -
+      class: pipeline
+      name: filter_variants
+      description:
+      components:
+            -
+              class: stage
+              name: discard_noncoding_variants
+              type:
+              description:
+              tools:
+              -
+                name: filter_vep.pl
+                version:
+            -
+              class: data
+              name: filtered_variants.vcf
+              type: vcf
+              attribute:
+                 - intermediate
+            - 
+              class: stage
+              name: select_transcripts
+              type:
+              description:
+              tools:
+              -
+                name: filter_transcripts.py
+                version:
+            -
+              class: data
+              name: filtered_variants.vcf
+              type:
+              attribute:
+                - intermediate
+            -
+             class: data
+             name: filtered_variants.table
+             type:
+             attribute:
+               - result
+
+      dataflows:
+
+            -
+              source: discard_noncoding_variants
+              destination: filtered_variants.vcf
+              action: generates
+            -
+              source: filtered_variants.vcf
+              destination: select_transcripts
+              action: usedBy
+            -
+              source: select_transcripts
+              destination: filtered_variants.vcf
+              action: generates
+            -
+             source: filtered_variants.vcf
+             destination: convert_to_table
+             action:
+            -
+             source: convert_to_table
+             destination: filtered_variants.table
+             action:
+            -
+             source: filtered_variants.table
+             destination: curation
+             action:
+    -
+      class: pipeline
+      name: bam_quality_assessment
+      description:
+      components:
+            -
+              class: stage
+              name: calculate_exome_coverage
+              type:
+              description:
+              tools:
+              -
+                name: bedtools
+                version: "2.25.0"
+            -
+              class: data
+              name: exome_coverage.gz
+              type: gz
+              attribute:
+                - result
+                - intermediate
+              quality_metrics:
+               -
+            -
+              class: stage
+              name: calculate_exon_coverage
+              type:
+              description:
+              tools:
+              -
+                name: calculate_exon_coverage.py
+                version:
+            -
+              class: data
+              name: exon_coverage.txt
+              type:
+              attribute:
+                 - result
+                 - intermediate
+              quality_metrics:
+            -
+              class: stage
+              name: calculate_depthofcoverage
+              type:
+              description:
+              tools:
+              -
+                name: gatk_depthofcoverage
+                version: "3.6"
+              commands:
+            -
+              class: data
+              name: depthofcoverage.cov
+              type:
+              attribute:
+                 - result
+
+            -
+              class: stage
+              name: collect_metrics_insert_size
+              type:
+              description:
+              tools:
+              -
+                name: picard_CollectInsertSizeMetrics
+                version:
+              commands:
+            -
+              class: data
+              name: insert_size_metrics.txt
+              type:
+              attribute:
+                 - result
+      dataflows:
+            -
+              source: recalibrated.bam
+              destination: calculate_exome_coverage
+              action: usedBy
+            -
+              source: recalibrated.bam
+              destination: calculate_exon_coverage
+              action: usedBy
+            -
+              source: calculate_exon_coverage
+              destination: exon_coverage.txt
+              action:
+            -
+              source: recalibrated.bam
+              destination: calculate_depthofcoverage
+              action: usedBy
+            -
+              source: recalibrated.bam
+              destination: collect_metrics_insert_size
+              action:
+            -
+              source: calculate_exome_coverage
+              destination: exome_coverage.gz
+              action: creates
+            -
+              source: collect_metrics_insert_size
+              destination: insert_size_metrics.txt
+              action:
+            -
+              source: calculate_depthofcoverage
+              destination: depthofcoverage.cov
+              action:
+            -
+              source: depthofcoverage.cov
+              destination: curation
+              action:
+            -
+              source: insert_size_metrics.txt
+              destination: curation
+              action:
+
+
+              
+    -
+      class: pipeline
+      name: quality_reporting
+      description:
+      components:
+
+            -
+              class: stage
+              name: generate_stage_report
+              type:
+              description:
+              tools:
+              -
+                name: qc_report.py
+            -
+              class: data
+              name: stage_report.pdf
+              type:
+              attribute:
+                - result
+
+      dataflows:
+            -
+              source: exome_coverage.gz
+              destination: generate_stage_report
+              action: displayed
+            -
+              source: exon_coverage.txt
+              destination: generate_stage_report
+              action: displayed
+            -
+             source: deduped_metrics.txt
+             destination: generate_stage_report
+             action: displayed
+            -
+             source: generate_stage_report
+             destination: stage_report.pdf
+             action: create
+            -
+             source: stage_report.pdf
+             destination: curation
+             action:
+            -
+             source: ontarget.txt
+             destination: generate_stage_report
+             action: 
+            -
+             source: karytype.txt
+             destination: generate_stage_report
+             action:
+            -
+             source: fragment.txt
+             destination: generate_stage_report
+             action:
+      
+dataflows:
+    -
+      source: reference_genome
+      destination: align_to_ref
+      action: mapsTo
+    -
+      source: reference_genome 
+      destination: merge_alignments
+      action: referredTo
+    -
+      source: reference_genome
+      destination: interval_creation
+      action: referredTo
+    -
+      source: reference_indels 
+      destination: interval_creation
+      action: referredTo
+    -
+      source: reference_genome
+      destination: indel_realignment
+      action: referredTo
+    -
+      source: reference_indels 
+      destination: indel_realignment
+      action: referredTo
+    -
+      source: reference_SNPs
+      destination: quality_score_calculation
+      action: referredTo
+    -
+      source: reference_indels
+      destination: quality_score_calculation
+      action: referredTo
+    -
+      source: reference_SNPs
+      destination: call_variants
+      action: annotates
+    -
+      source: reference_indels
+      destination: call_variants
+      action: annotates
+    -
+      source: reference_genome
+      destination: call_variants
+      action: referredTo
+    -
+      source: select_target_region
+      destination: combined_target_region.bed
+      action: create
+    -
+      source: combined_target_region.bed
+      destination: interval_creation
+      action: referredTo
+    -
+      source: combined_target_region.bed
+      destination: quality_score_calculation
+      action: referredTo
+    -
+      source: combined_target_region.bed
+      destination: call_variants
+      action: referredTo
+    -
+      source: combined_target_region.bed
+      destination: calculate_exome_coverage
+      action: referredTo
+    -
+      source: UCSC_exons.bed
+      destination: select_target_region
+      action: referredTo
