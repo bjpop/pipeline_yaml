@@ -55,13 +55,23 @@ def parse_args():
 
 def process_data(graph, component):
     name = component['name']
-    graph.node(name, shape='rectangle')
+    attribute = '\n'.join([attribute for attribute in component['attribute']])
+    if attribute == "result":
+        graph.node(name, shape = 'rectangle', style = 'filled', fillcolor='red')
+    elif attribute == "reference":
+        graph.node(name, shape = 'rectangle', style = 'filled', fillcolor='gold')
+    elif attribute == "intermediate":
+        graph.node(name, shape = 'rectangle', style = 'filled', fillcolor='grey')
+
+#    graph.node(name, shape='rectangle')
 
 
 def process_stage(graph, component):
     name = component['name']
-    graph.node(name)
-
+    description = component['description']
+    tool = '\n'.join([tool['name'] for tool in component['tools']])
+#    caption = '{} {} {}'.format(tool,' ', name)
+    graph.node(name, label = name+"\n"+ "(" + tool + ")")
 
 def process_pipeline(graph, component):
     name = component['name']
@@ -89,7 +99,8 @@ def process_dataflows(graph, dataflows):
     for dataflow in dataflows:
         source = dataflow['source']
         destination = dataflow['destination']
-        graph.edge(source, destination)
+        action =  dataflow['action']
+        graph.edge(source, destination, label=action, fontsize='7')
 
 def process_top_level(pipeline):
     if pipeline['class'] != 'pipeline':
@@ -101,7 +112,6 @@ def process_top_level(pipeline):
     toplevel_graph = gv.Digraph(name, format='png', graph_attr={'compound': 'true'}) 
     process_components(toplevel_graph, components)
     process_dataflows(toplevel_graph, dataflows)
-    #toplevel_graph.render(filename=name)
     toplevel_graph.view()
 
 
